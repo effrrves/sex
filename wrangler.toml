@@ -1,0 +1,19 @@
+name = "webull-trading-bot"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"] # webull.js内のMD5署名生成(node:crypto)に必要
+
+# 1分ごとに実行(Cron Trigger)
+[triggers]
+crons = ["* * * * *"]
+
+# 取引状態(ポジション・履歴・損益)を保存するKV
+# 事前に `wrangler kv namespace create TRADING_STATE` を実行してIDを発行し、下記に設定してください
+[[kv_namespaces]]
+binding = "TRADING_STATE"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# シークレットは wrangler.toml に書かず、以下のコマンドで登録してください
+#   wrangler secret put WEBULL_API_KEY
+#   wrangler secret put WEBULL_API_SECRET
+#   wrangler secret put ANTHROPIC_API_KEY
