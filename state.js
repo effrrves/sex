@@ -1,62 +1,73 @@
 // KVに保存する取引状態の管理
 // キー構成:
-//   state:current      -> { position, cash, dailyPnl, dailyStartEquity, lastUpdated, tradingDate, halted }
-//   history:{timestamp} -> 個別の取引ログ(任意、デバッグ用)
+//   state:account          -> { dailyPnl, dailyStartEquity, tradingDate, halted, lastUpdated }
+//                              (口座全体の状態。日次損益・サーキットブレーカーは銘柄をまたいで共通)
+//   state:symbol:{SYMBOL}  -> { position, lastUpdated } (銘柄ごとの保有株数)
+//   history:{timestamp}    -> 個別の取引ログ(任意、デバッグ用)
 
-const STATE_KEY = "state:current";
+const ACCOUNT_STATE_KEY = "state:account";
+const symbolStateKey = (symbol) => `state:symbol:${symbol}`;
 
-export async function loadState(env) {
-  const raw = await env.TRADING_STATE.get(STATE_KEY, "json");
+export async function loadAccountState(env) {
+  const raw = await env.TRADING_STATE.get(ACCOUNT_STATE_KEY, "json");
   if (raw) return raw;
 
-  // 初期状態(初回起動時)
   return {
-    position: 0, // 保有株数
-    cash: 0, // 未使用: 実際の資金はWebull側の口座残高を都度取得する想定
     dailyPnl: 0,
     dailyStartEquity: null,
-    tradingDate: null, // "YYYY-MM-DD" (米国東部時間ベースで管理推奨)
-    halted: false, // true の間は新規発注をスキップ
+    tradingDate: null, // "YYYY-MM-DD" (米国東部時間ベース)
+    halted: false, // true の間は全銘柄で新規発注をスキップ
     lastUpdated: null,
   };
 }
 
-export async function saveState(env, state) {
+export async function saveAccountState(env, state) {
   state.lastUpdated = new Date().toISOString();
-  await env.TRADING_STATE.put(STATE_KEY, JSON.stringify(state));
+  await env.TRADING_STATE.put(ACCOUNT_STATE_KEY, JSON.stringify(state));
+}
+
+export async function loadSymbolState(env, symbol) {
+  const raw = await env.TRADING_STATE.get(symbolStateKey(symbol), "json");
+  if (raw) return raw;
+  return { position: 0, lastUpdated: null };
+}
+
+export async function saveSymbolState(env, symbol, state) {
+  state.lastUpdated = new Date().toISOString();
+  await env.TRADING_STATE.put(symbolStateKey(symbol), JSON.stringify(state));
 }
 
 export async function logTrade(env, trade) {
-  const key = `history:${Date.now()}`;
+  const key = `history:${Date.now()}:${trade.symbol ?? "unknown"}`;
   await env.TRADING_STATE.put(key, JSON.stringify(trade));
 }
 
-// 1日の最大損失額(ドル)を超えたら halted = true にして以降の新規発注を止める。
+// 1日の最大損失額(ドル、口座全体)を超えたら halted = true にして以降の新規発注を全銘柄で止める。
 // DAILY_LOSS_LIMIT は wrangler secret / vars で設定してください(未設定時は安全側でデフォルト値を使用)。
-export function checkCircuitBreaker(state, currentEquity, dailyLossLimit) {
-  if (state.dailyStartEquity == null) {
-    state.dailyStartEquity = currentEquity;
+export function checkCircuitBreaker(accountState, currentEquity, dailyLossLimit) {
+  if (accountState.dailyStartEquity == null) {
+    accountState.dailyStartEquity = currentEquity;
   }
 
-  state.dailyPnl = currentEquity - state.dailyStartEquity;
+  accountState.dailyPnl = currentEquity - accountState.dailyStartEquity;
 
-  if (!state.halted && state.dailyPnl <= -Math.abs(dailyLossLimit)) {
-    state.halted = true;
+  if (!accountState.halted && accountState.dailyPnl <= -Math.abs(dailyLossLimit)) {
+    accountState.halted = true;
     console.warn(
-      `[CIRCUIT BREAKER] 日次損失上限(${dailyLossLimit})に到達。以降の新規発注を停止します。dailyPnl=${state.dailyPnl}`
+      `[CIRCUIT BREAKER] 日次損失上限(${dailyLossLimit})に到達。以降の新規発注を全銘柄で停止します。dailyPnl=${accountState.dailyPnl}`
     );
   }
 
-  return state;
+  return accountState;
 }
 
 // 日付が変わったら(米国東部時間ベース)日次カウンタをリセット
-export function resetIfNewTradingDay(state, todayStr) {
-  if (state.tradingDate !== todayStr) {
-    state.tradingDate = todayStr;
-    state.dailyStartEquity = null;
-    state.dailyPnl = 0;
-    state.halted = false;
+export function resetIfNewTradingDay(accountState, todayStr) {
+  if (accountState.tradingDate !== todayStr) {
+    accountState.tradingDate = todayStr;
+    accountState.dailyStartEquity = null;
+    accountState.dailyPnl = 0;
+    accountState.halted = false;
   }
-  return state;
+  return accountState;
 }
