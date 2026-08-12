@@ -11,7 +11,7 @@ crons = ["* * * * *"]
 # 事前に `wrangler kv namespace create TRADING_STATE` を実行してIDを発行し、下記に設定してください
 [[kv_namespaces]]
 binding = "TRADING_STATE"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+id = "0e52cc2425b046e2b07292723b440202"
 
 # シークレットは wrangler.toml に書かず、以下のコマンドで登録してください
 #   wrangler secret put WEBULL_API_KEY
