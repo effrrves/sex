@@ -1,3 +1,5 @@
+
+
 # webull-trading-bot (v1: 動くものを作るフェーズ)
 
 ウィブル証券OpenAPI + Claude API で米国株の自動売買を行うCloudflare Worker。
