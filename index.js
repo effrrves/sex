@@ -6,9 +6,11 @@ import {
   loadSymbolState,
   saveSymbolState,
   logTrade,
+  listTrades,
   checkCircuitBreaker,
   resetIfNewTradingDay,
 } from "./state.js";
+import { DASHBOARD_HTML } from "./dashboard.js";
 
 // --- 設定(必要に応じて env vars / wrangler.toml の [vars] に移してください) ---
 // 銘柄はCloudflareの Variables and Secrets で SYMBOLS="AAPL,MSFT,GOOGL" のようにカンマ区切りで指定できます。
@@ -63,7 +65,15 @@ async function runSymbolCycle(env, symbol, { balance, accountState }) {
     log.push(`[${symbol}] ORDER PLACED: ${JSON.stringify(order)}`);
 
     symbolState.position += decision.action === "BUY" ? quantity : -quantity;
-    await logTrade(env, { time: new Date().toISOString(), symbol, ...decision, quantity, order });
+    await logTrade(env, {
+      time: new Date().toISOString(),
+      symbol,
+      price: quote.price,
+      currency: quote.currency,
+      ...decision,
+      quantity,
+      order,
+    });
   } else {
     log.push(`[${symbol}] action=HOLD または数量0のため発注なし`);
   }
@@ -144,6 +154,44 @@ export default {
       }
       return Response.json({ account: accountState, symbols: symbolStates });
     }
-    return new Response("webull-trading-bot: /run で手動実行, /status で状態確認", { status: 200 });
+    if (url.pathname === "/api/summary") {
+      try {
+        const symbols = getSymbols(env);
+        const accountId = env.WEBULL_ACCOUNT_ID;
+        const [balance, accountState] = await Promise.all([
+          getAccountBalance(env, accountId),
+          loadAccountState(env),
+        ]);
+        const currentEquity = parseFloat(balance.total_cash_balance) + parseFloat(balance.total_unrealized_profit_loss || "0");
+
+        const positions = {};
+        for (const symbol of symbols) {
+          positions[symbol] = await loadSymbolState(env, symbol);
+        }
+
+        const todayStr = todayStrET();
+        const recentTrades = await listTrades(env, 500);
+        const todayTradeCount = recentTrades.filter((t) => t.time && t.time.startsWith(todayStr)).length;
+
+        return Response.json({
+          account: accountState,
+          currentEquity,
+          cashBalance: parseFloat(balance.total_cash_balance),
+          positions,
+          todayTradeCount,
+        });
+      } catch (err) {
+        return Response.json({ error: String(err) }, { status: 500 });
+      }
+    }
+    if (url.pathname === "/api/history") {
+      const limit = parseInt(url.searchParams.get("limit") || "100", 10);
+      const trades = await listTrades(env, limit);
+      return Response.json({ trades });
+    }
+    if (url.pathname === "/dashboard") {
+      return new Response(DASHBOARD_HTML, { headers: { "Content-Type": "text/html; charset=UTF-8" } });
+    }
+    return new Response("webull-trading-bot: /dashboard で成績確認, /run で手動実行, /status で状態確認", { status: 200 });
   },
 };
