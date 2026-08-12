@@ -42,6 +42,14 @@ export async function logTrade(env, trade) {
   await env.TRADING_STATE.put(key, JSON.stringify(trade));
 }
 
+// 取引履歴を新しい順に取得する(KVのlist結果はキー順=時刻順で返るため逆順にする)
+export async function listTrades(env, limit = 100) {
+  const listed = await env.TRADING_STATE.list({ prefix: "history:", limit: 1000 });
+  const keys = listed.keys.map((k) => k.name).sort().reverse().slice(0, limit);
+  const trades = await Promise.all(keys.map((k) => env.TRADING_STATE.get(k, "json")));
+  return trades.filter(Boolean);
+}
+
 // 1日の最大損失額(ドル、口座全体)を超えたら halted = true にして以降の新規発注を全銘柄で止める。
 // DAILY_LOSS_LIMIT は wrangler secret / vars で設定してください(未設定時は安全側でデフォルト値を使用)。
 export function checkCircuitBreaker(accountState, currentEquity, dailyLossLimit) {
